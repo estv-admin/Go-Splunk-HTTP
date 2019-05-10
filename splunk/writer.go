@@ -12,6 +12,22 @@ const (
 	defaultRetries   = 2
 )
 
+// NewWriter creates a new threadsafe, aysnchronous splunk writer.
+// This should be the primary way a Splunk writer object is constructed.
+// The client's configuration determines what source, sourcetype & index will be used for events
+// Example for logrus:
+//    splunkWriter := splunk.NewWriter(client, 0, 0, 0)
+//    logrus.SetOutput(io.MultiWriter(os.Stdout, splunkWriter))
+func NewWriter(client *Client, flushInterval time.Duration, flushThreshold int, maxRetries int) *Writer {
+	return &Writer{
+		Client:         client,
+		FlushInterval:  flushInterval,
+		FlushThreshold: flushThreshold,
+		MaxRetries:     maxRetries,
+		errors:         make(chan error, bufferSize),
+	}
+}
+
 // Writer is a threadsafe, aysnchronous splunk writer.
 // It implements io.Writer for usage in logging libraries, or whatever you want to send to splunk :)
 // Writer.Client's configuration determines what source, sourcetype & index will be used for events
@@ -46,7 +62,9 @@ func (w *Writer) Write(b []byte) (int, error) {
 		// synchronously set up dataChan
 		w.dataChan = make(chan *message, bufferSize)
 		// Spin up single goroutine to listen to our writes
-		w.errors = make(chan error, bufferSize)
+		if w.errors == nil {
+			w.errors = make(chan error, bufferSize)
+		}
 		go w.listen()
 	})
 	// Send the data to the channel
