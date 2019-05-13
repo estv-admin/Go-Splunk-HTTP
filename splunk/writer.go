@@ -1,6 +1,8 @@
 package splunk
 
 import (
+	"encoding/json"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -117,10 +119,23 @@ func (w *Writer) listen() {
 // send sends data to splunk, retrying upon failure
 func (w *Writer) send(messages []*message, retries int) {
 	// Create events from our data so we can send them to splunk
-	events := make([]*Event, len(messages))
-	for i, m := range messages {
+	events := []*Event{}
+	for _, m := range messages {
+		var dat map[string]interface{}
+		if err := json.Unmarshal(m.data, &dat); err != nil {
+			err = fmt.Errorf("error message for splunk should be json formatted: %v", err)
+			select {
+			case w.errors <- err:
+			// Don't block in case no one is listening or our errors channel is full
+			default:
+			}
+			continue
+		}
 		// Use the configuration of the Client for the event
-		events[i] = w.Client.NewEventWithTime(m.writtenAt.Unix(), m.data, w.Client.Source, w.Client.SourceType, w.Client.Index)
+		events = append(events, w.Client.NewEventWithTime(m.writtenAt.Unix(), dat, w.Client.Source, w.Client.SourceType, w.Client.Index))
+	}
+	if len(events) <= 0 {
+		return
 	}
 	// Send the events to splunk
 	err := w.Client.LogEvents(events)
